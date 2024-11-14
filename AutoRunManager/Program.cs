@@ -1,12 +1,19 @@
 ﻿using System;
+using Microsoft.Extensions.Logging;
 
 namespace AutoRunManager
 {
-    class Program
+ class Program
     {
         static void Main(string[] args)
         {
+            var administratorChecker = new AdministratorChecker();
+            bool isAdmin = administratorChecker.IsCurrentUserAdmin();
+            
+            StaticFileLogger.LogInformation("Application started");
+            
             Printer.StartPage();
+            Printer.PrivilegeStatusPrinter(isAdmin);
             
             while (true)
             {
@@ -18,47 +25,63 @@ namespace AutoRunManager
                     Console.WriteLine("4. Backup startup programs");
                     Console.WriteLine("5. Restore startup programs");
                     Console.WriteLine("6. Cleanup startup programs");
-                    Console.WriteLine("7. Exit");
+                    Console.WriteLine("7. Display remote startup programs");
+                    Console.WriteLine("8. Exit");
                     Console.Write("Enter your choice: ");
 
                     if (!int.TryParse(Console.ReadLine(), out int choice))
                     {
                         Console.WriteLine("Invalid choice. Please enter a number.");
+                        StaticFileLogger.LogError("Invalid choice entered.");
                         continue;
                     }
 
                     switch (choice)
                     {
                         case 1:
+                            StaticFileLogger.LogInformation("Displaying startup programs.");
                             StartupManager.DisplayStartupPrograms();
                             break;
                         case 2:
                             var (programName, programPath) = GetProgramDetails();
+                            StaticFileLogger.LogInformation($"Adding program to startup: {programName}, {programPath}");
                             StartupManager.AddStartupProgram(programName, programPath);
                             break;
                         case 3:
                             programName = GetProgramName();
+                            StaticFileLogger.LogInformation($"Removing program from startup: {programName}");
                             StartupManager.RemoveStartupProgram(programName);
                             break;
                         case 4:
+                            StaticFileLogger.LogInformation("Backing up startup programs.");
                             StartupManager.BackupStartupPrograms();
                             break;
                         case 5:
+                            StaticFileLogger.LogInformation("Restoring startup programs.");
                             StartupManager.RestoreStartupPrograms();
                             break;
                         case 6:
+                            StaticFileLogger.LogInformation("Cleaning up startup programs.");
                             StartupManager.CleanupStartupPrograms();
                             break;
                         case 7:
+                            Console.Write("Enter remote machine name: ");
+                            string machineName = Console.ReadLine();
+                            StaticFileLogger.LogInformation($"Displaying remote startup programs for machine: {machineName}");
+                            StartupManager.DisplayRemoteStartupPrograms(machineName);
+                            break;
+                        case 8:
+                            StaticFileLogger.LogInformation("Exiting application.");
                             return;
                         default:
                             Console.WriteLine("Invalid choice.");
+                            StaticFileLogger.LogError("Invalid choice entered.");
                             break;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log($"An error occurred: {ex.Message}");
+                    StaticFileLogger.LogError($"An error occurred: {ex.Message}");
                 }
 
                 Console.WriteLine();

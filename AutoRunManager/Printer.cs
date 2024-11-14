@@ -18,4 +18,16 @@ public static class Printer
         
         Console.ResetColor();
     }
+    
+    public static void PrivilegeStatusPrinter(bool isAdmin)
+    {
+        if (isAdmin)
+        {
+            Console.WriteLine("The application is running with administrator privileges.");
+        }
+        else
+        {
+            Console.WriteLine("The application is not running with administrator privileges.");
+        }
+    }
 }

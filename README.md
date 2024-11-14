@@ -14,6 +14,7 @@ AutoRun Manager is a utility for managing the programs that run at startup on a 
 # Notes
 - The program interacts with the Windows Registry to manage startup programs. Please use it with caution.
 - The backup and restore features do not backup or restore the actual programs, only the startup configuration.
+- All actions and errors are logged to a text file located in the `My Documents\AutoRunManager` directory. Each log file is named with a timestamp to ensure unique filenames.
 
 ## Usage
 
