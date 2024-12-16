@@ -10,11 +10,9 @@ public static class RegistryHelper
     {
         return OperatingSystem.IsWindows();
     }
-
+    
     public static string[] ReadValueNames(string keyPath)
     {
-        if (!IsWindows()) return Array.Empty<string>();
-        
         using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath))
         {
             return key?.GetValueNames() ?? Array.Empty<string>();
@@ -23,8 +21,6 @@ public static class RegistryHelper
 
     public static object ReadValue(string keyPath, string valueName)
     {
-        if (!IsWindows()) return null;
-        
         using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath))
         {
             return key?.GetValue(valueName);
@@ -33,24 +29,17 @@ public static class RegistryHelper
 
     public static void WriteValue(string keyPath, string valueName, object value)
     {
-        if (!IsWindows()) return;
-        
-        using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath, true))
+        using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath, true) ?? Registry.CurrentUser.CreateSubKey(keyPath))
         {
-            key?.SetValue(valueName, value);
+            key.SetValue(valueName, value);
         }
     }
 
     public static void DeleteValue(string keyPath, string valueName)
     {
-        if (!IsWindows()) return;
-        
         using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath, true))
         {
-            if (key?.GetValue(valueName) != null)
-            {
-                key.DeleteValue(valueName);
-            }
+            key?.DeleteValue(valueName, false);
         }
     }
 

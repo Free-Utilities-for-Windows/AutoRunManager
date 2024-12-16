@@ -48,9 +48,13 @@ namespace AutoRunManager
                             StartupManager.AddStartupProgram(programName, programPath);
                             break;
                         case 3:
-                            programName = GetProgramName();
-                            StaticFileLogger.LogInformation($"Removing program from startup: {programName}");
-                            StartupManager.RemoveStartupProgram(programName);
+                            Console.Write("Enter program name to toggle: ");
+                            string toggleName = Console.ReadLine();
+                            Console.Write("Enable program? (true/false): ");
+                            if (bool.TryParse(Console.ReadLine(), out bool enable))
+                            {
+                                StartupManager.SetStartupProgramState(toggleName, enable);
+                            }
                             break;
                         case 4:
                             StaticFileLogger.LogInformation("Backing up startup programs.");
