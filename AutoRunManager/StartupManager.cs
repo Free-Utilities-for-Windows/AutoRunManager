@@ -5,26 +5,92 @@ namespace AutoRunManager;
 public class StartupManager
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string DisabledKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
     private const string BackupKey = @"Software\AutoRunManager\StartupBackup";
 
+    public static List<StartupProgram> GetStartupPrograms()
+    {
+        var programs = new List<StartupProgram>();
+
+        if (!RegistryHelper.IsWindows()) return programs;
+
+        try
+        {
+            using (var runKey = Registry.CurrentUser.OpenSubKey(RunKey))
+            using (var disabledKey = Registry.CurrentUser.OpenSubKey(DisabledKey))
+            {
+                if (runKey != null)
+                {
+                    foreach (string name in runKey.GetValueNames())
+                    {
+                        var path = runKey.GetValue(name)?.ToString();
+                        var isEnabled = true;
+
+                        if (disabledKey != null)
+                        {
+                            var state = disabledKey.GetValue(name) as byte[];
+                            if (state != null && state.Length > 0)
+                            {
+                                isEnabled = state[0] != 3;
+                            }
+                        }
+
+                        programs.Add(new StartupProgram
+                        {
+                            Name = name,
+                            Path = path,
+                            IsEnabled = isEnabled
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StaticFileLogger.LogError($"Error getting startup programs: {ex.Message}");
+        }
+
+        return programs;
+    }
+
     public static void DisplayStartupPrograms()
+    {
+        var programs = GetStartupPrograms();
+
+        Console.WriteLine("\nStartup Programs:");
+        Console.WriteLine("----------------------------------------");
+        Console.WriteLine("Name                  Status    Path");
+        Console.WriteLine("----------------------------------------");
+
+        foreach (var program in programs)
+        {
+            Console.WriteLine($"{program.Name,-20} {(program.IsEnabled ? "Enabled " : "Disabled")} {program.Path}");
+        }
+    }
+
+    public static void SetStartupProgramState(string programName, bool enable)
     {
         if (!RegistryHelper.IsWindows()) return;
 
         try
         {
-            foreach (string programName in RegistryHelper.ReadValueNames(RunKey))
+            using (var key = Registry.CurrentUser.CreateSubKey(DisabledKey, true))
             {
-                var value = RegistryHelper.ReadValue(RunKey, programName);
-                var valueKind = RegistryHelper.GetValueKind(RunKey, programName);
-                Console.WriteLine($"{programName} : {value} (Type: {valueKind})");
-                StaticFileLogger.LogInformation($"Displayed startup program: {programName} : {value} (Type: {valueKind})");
-                Console.WriteLine();
+                if (key != null)
+                {
+                    byte[] state = new byte[12];
+                    state[0] = (byte)(enable ? 2 : 3);
+                    key.SetValue(programName, state, RegistryValueKind.Binary);
+
+                    Console.WriteLine($"Program {programName} has been {(enable ? "enabled" : "disabled")}");
+                    StaticFileLogger.LogInformation(
+                        $"Program {programName} state changed to {(enable ? "enabled" : "disabled")}");
+                }
             }
         }
         catch (Exception ex)
         {
-            StaticFileLogger.LogError($"An error occurred: {ex.Message}");
+            StaticFileLogger.LogError($"Error setting program state: {ex.Message}");
         }
     }
 
@@ -37,8 +103,9 @@ public class StartupManager
             if (Validator.IsValidFilePath(programPath))
             {
                 RegistryHelper.WriteValue(RunKey, programName, programPath);
-                Console.WriteLine($"Program {programName} added to startup.");
-                StaticFileLogger.LogInformation($"Program {programName} added to startup with path {programPath}.");
+                SetStartupProgramState(programName, true);
+                Console.WriteLine($"Program {programName} added to startup and enabled.");
+                StaticFileLogger.LogInformation($"Program {programName} added to startup with path {programPath}");
             }
             else
             {
@@ -48,7 +115,7 @@ public class StartupManager
         }
         catch (Exception ex)
         {
-            StaticFileLogger.LogError($"An error occurred: {ex.Message}");
+            StaticFileLogger.LogError($"Error adding startup program: {ex.Message}");
         }
     }
 
@@ -74,32 +141,40 @@ public class StartupManager
 
         try
         {
-            if (RegistryHelper.SetRegistryKeyAccessPermissions(BackupKey))
+            using (var backupKey = Registry.CurrentUser.CreateSubKey(BackupKey))
             {
-                if (!RegistryHelper.KeyExists(BackupKey))
+                if (backupKey == null)
                 {
-                    Registry.CurrentUser.CreateSubKey(BackupKey);
+                    throw new Exception("Failed to create backup key");
                 }
 
-                foreach (string programName in RegistryHelper.ReadValueNames(RunKey))
+                var programs = GetStartupPrograms();
+
+                foreach (var valueName in backupKey.GetValueNames())
                 {
-                    object programPath = RegistryHelper.ReadValue(RunKey, programName);
-                    RegistryHelper.WriteValue(BackupKey, programName, programPath);
+                    backupKey.DeleteValue(valueName);
                 }
 
-                string backupPath = $"HKEY_CURRENT_USER\\{BackupKey}";
-                Console.WriteLine($"Startup programs backed up to {backupPath}.");
-                StaticFileLogger.LogInformation($"Startup programs backed up to {backupPath}.");
-            }
-            else
-            {
-                Console.WriteLine("Failed to set permissions for backup key.");
-                StaticFileLogger.LogError("Failed to set permissions for backup key.");
+                foreach (var program in programs)
+                {
+                    backupKey.SetValue(program.Name, program.Path);
+
+                    using (var stateKey = Registry.CurrentUser.CreateSubKey(BackupKey + "\\State"))
+                    {
+                        byte[] state = new byte[12];
+                        state[0] = (byte)(program.IsEnabled ? 2 : 3);
+                        stateKey.SetValue(program.Name, state, RegistryValueKind.Binary);
+                    }
+                }
+
+                Console.WriteLine("Startup programs backed up successfully.");
+                StaticFileLogger.LogInformation("Startup programs backed up successfully.");
             }
         }
         catch (Exception ex)
         {
-            StaticFileLogger.LogError($"An error occurred: {ex.Message}");
+            Console.WriteLine($"Failed to backup startup programs: {ex.Message}");
+            StaticFileLogger.LogError($"Backup failed: {ex.Message}");
         }
     }
 
@@ -109,26 +184,53 @@ public class StartupManager
 
         try
         {
-            if (!RegistryHelper.KeyExists(BackupKey))
+            using (var backupKey = Registry.CurrentUser.OpenSubKey(BackupKey))
             {
-                Console.WriteLine("No backup found.");
-                StaticFileLogger.LogInformation("No backup found.");
-                return;
-            }
+                if (backupKey == null)
+                {
+                    throw new Exception("No backup found");
+                }
+                
+                using (var runKey = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (runKey != null)
+                    {
+                        foreach (var valueName in runKey.GetValueNames())
+                        {
+                            runKey.DeleteValue(valueName);
+                        }
+                    }
+                }
 
-            foreach (string programName in RegistryHelper.ReadValueNames(BackupKey))
-            {
-                object programPath = RegistryHelper.ReadValue(BackupKey, programName);
-                RegistryHelper.WriteValue(RunKey, programName, programPath);
-            }
+                foreach (var programName in backupKey.GetValueNames())
+                {
+                    var programPath = backupKey.GetValue(programName)?.ToString();
+                    if (!string.IsNullOrEmpty(programPath))
+                    {
+                        AddStartupProgram(programName, programPath);
 
-            string backupPath = $"HKEY_CURRENT_USER\\{BackupKey}";
-            Console.WriteLine($"Startup programs restored from {backupPath}.");
-            StaticFileLogger.LogInformation($"Startup programs restored from {backupPath}.");
+                        using (var stateKey = Registry.CurrentUser.OpenSubKey(BackupKey + "\\State"))
+                        {
+                            if (stateKey != null)
+                            {
+                                var state = stateKey.GetValue(programName) as byte[];
+                                if (state != null && state.Length > 0)
+                                {
+                                    SetStartupProgramState(programName, state[0] == 2);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Console.WriteLine("Startup programs restored successfully.");
+                StaticFileLogger.LogInformation("Startup programs restored successfully.");
+            }
         }
         catch (Exception ex)
         {
-            StaticFileLogger.LogError($"An error occurred: {ex.Message}");
+            Console.WriteLine($"Failed to restore startup programs: {ex.Message}");
+            StaticFileLogger.LogError($"Restore failed: {ex.Message}");
         }
     }
 
@@ -156,14 +258,16 @@ public class StartupManager
         {
             if (RegistryHelper.OpenRemoteBaseKey(machineName))
             {
-                using (RegistryKey remoteRunKey = RegistryKey.OpenRemoteBaseKey(RegistryHive.CurrentUser, machineName).OpenSubKey(RunKey))
+                using (RegistryKey remoteRunKey = RegistryKey.OpenRemoteBaseKey(RegistryHive.CurrentUser, machineName)
+                           .OpenSubKey(RunKey))
                 {
                     if (remoteRunKey != null)
                     {
                         foreach (string programName in remoteRunKey.GetValueNames())
                         {
                             Console.WriteLine($"{programName} : {remoteRunKey.GetValue(programName)}");
-                            StaticFileLogger.LogInformation($"Displayed remote startup program: {programName} : {remoteRunKey.GetValue(programName)}");
+                            StaticFileLogger.LogInformation(
+                                $"Displayed remote startup program: {programName} : {remoteRunKey.GetValue(programName)}");
                         }
                     }
                     else
