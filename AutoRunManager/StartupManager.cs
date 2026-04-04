@@ -1,4 +1,4 @@
-﻿using Microsoft.Win32;
+using Microsoft.Win32;
 
 namespace AutoRunManager;
 
@@ -53,6 +53,35 @@ public class StartupManager
         return programs;
     }
 
+    private static StartupProgram ResolveProgram(string programName)
+    {
+        var programs = GetStartupPrograms();
+
+        var program = programs.Find(p => p.Name.Equals(programName, StringComparison.OrdinalIgnoreCase));
+        if (program != null) return program;
+
+        var matches = programs
+            .Where(p => p.Name.Contains(programName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            Console.WriteLine($"Program \"{programName}\" not found in startup programs.");
+            StaticFileLogger.LogError($"Program \"{programName}\" not found in startup programs.");
+            return null;
+        }
+
+        if (matches.Count > 1)
+        {
+            Console.WriteLine($"Multiple programs match \"{programName}\". Please be more specific:");
+            foreach (var match in matches)
+                Console.WriteLine($"  - {match.Name}");
+            return null;
+        }
+
+        return matches[0];
+    }
+
     public static void DisplayStartupPrograms()
     {
         var programs = GetStartupPrograms();
@@ -74,17 +103,20 @@ public class StartupManager
 
         try
         {
+            var program = ResolveProgram(programName);
+            if (program == null) return;
+
             using (var key = Registry.CurrentUser.CreateSubKey(DisabledKey, true))
             {
                 if (key != null)
                 {
                     byte[] state = new byte[12];
                     state[0] = (byte)(enable ? 2 : 3);
-                    key.SetValue(programName, state, RegistryValueKind.Binary);
+                    key.SetValue(program.Name, state, RegistryValueKind.Binary);
 
-                    Console.WriteLine($"Program {programName} has been {(enable ? "enabled" : "disabled")}");
+                    Console.WriteLine($"Program \"{program.Name}\" has been {(enable ? "enabled" : "disabled")}.");
                     StaticFileLogger.LogInformation(
-                        $"Program {programName} state changed to {(enable ? "enabled" : "disabled")}");
+                        $"Program {program.Name} state changed to {(enable ? "enabled" : "disabled")}");
                 }
             }
         }
@@ -125,9 +157,13 @@ public class StartupManager
 
         try
         {
-            RegistryHelper.DeleteValue(RunKey, programName);
-            Console.WriteLine($"Program {programName} removed from startup.");
-            StaticFileLogger.LogInformation($"Program {programName} removed from startup.");
+            var program = ResolveProgram(programName);
+            if (program == null) return;
+
+            RegistryHelper.DeleteValue(RunKey, program.Name);
+            RegistryHelper.DeleteValue(DisabledKey, program.Name);
+            Console.WriteLine($"Program \"{program.Name}\" removed from startup.");
+            StaticFileLogger.LogInformation($"Program {program.Name} removed from startup.");
         }
         catch (Exception ex)
         {
@@ -144,19 +180,17 @@ public class StartupManager
             using (var backupKey = Registry.CurrentUser.CreateSubKey(BackupKey))
             {
                 if (backupKey == null)
-                {
                     throw new Exception("Failed to create backup key");
-                }
 
                 var programs = GetStartupPrograms();
 
                 foreach (var valueName in backupKey.GetValueNames())
-                {
                     backupKey.DeleteValue(valueName);
-                }
 
                 foreach (var program in programs)
                 {
+                    if (program.Path == null) continue;
+
                     backupKey.SetValue(program.Name, program.Path);
 
                     using (var stateKey = Registry.CurrentUser.CreateSubKey(BackupKey + "\\State"))
@@ -187,18 +221,14 @@ public class StartupManager
             using (var backupKey = Registry.CurrentUser.OpenSubKey(BackupKey))
             {
                 if (backupKey == null)
-                {
                     throw new Exception("No backup found");
-                }
-                
+
                 using (var runKey = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
                     if (runKey != null)
                     {
                         foreach (var valueName in runKey.GetValueNames())
-                        {
                             runKey.DeleteValue(valueName);
-                        }
                     }
                 }
 
@@ -215,9 +245,7 @@ public class StartupManager
                             {
                                 var state = stateKey.GetValue(programName) as byte[];
                                 if (state != null && state.Length > 0)
-                                {
                                     SetStartupProgramState(programName, state[0] == 2);
-                                }
                             }
                         }
                     }
@@ -240,7 +268,13 @@ public class StartupManager
 
         try
         {
-            RegistryHelper.DeleteKey(RunKey);
+            var programs = GetStartupPrograms();
+            foreach (var program in programs)
+            {
+                RegistryHelper.DeleteValue(RunKey, program.Name);
+                RegistryHelper.DeleteValue(DisabledKey, program.Name);
+            }
+
             Console.WriteLine("Startup programs cleaned up.");
             StaticFileLogger.LogInformation("Startup programs cleaned up.");
         }
